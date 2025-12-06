@@ -31,18 +31,18 @@ logger.setLevel(logging.INFO)
 _jobs: Dict[str, Dict[str, Any]] = {}
 
 # Try import Qiskit; if not available, we will fallback
+# Try import Qiskit; if not available, we will fallback (robust across qiskit versions)
+# Qiskit 2.x import logic
 _QISKIT_AVAILABLE = False
 try:
-    # qiskit-terra and qiskit-aer are the main dependencies for simulation
-    from qiskit import QuantumCircuit, Aer, transpile, execute
+    from qiskit import QuantumCircuit, transpile
     from qiskit.circuit import Parameter
-    from qiskit.utils import QuantumInstance
-    from qiskit.algorithms.optimizers import COBYLA
+    from qiskit_aer import AerSimulator
     _QISKIT_AVAILABLE = True
-    logger.info("Qiskit imported: using quantum simulator where possible.")
-except Exception:
+    logger.info("Qiskit 2.x + AerSimulator loaded successfully.")
+except Exception as e:
     _QISKIT_AVAILABLE = False
-    logger.info("Qiskit not available — using classical fallback optimizer.")
+    logger.info(f"Qiskit unavailable, fallback enabled: {e}")
 
 
 # -------------------------
@@ -119,116 +119,114 @@ def _build_simple_vqc(num_qubits: int, num_layers: int):
     return qc, params
 
 
-def _qiskit_optimize(features: Dict[str, float], maxiter: int = 30) -> Dict[str, Any]:
+def _qiskit_optimize(features: Dict[str, float], maxiter: int = 16):
     """
-    Run a simple variational loop using Qiskit's Aer simulator.
-    Objective: produce a scalar "risk" we minimize. For demo we construct a small Hamiltonian
-    where higher calories and kapha increase risk.
+    Qiskit 2.x execution path using AerSimulator and counts-based expectation.
+    Uses a simple random-search optimizer for robustness on varied qiskit installs.
+
+    Returns a dict:
+      { "engine": "qiskit_simulator", "risk_score": float, ... }
     """
-    # pull a compact numeric vector from features
-    v = [
-        features.get("calories_norm", 0.0),
-        features.get("protein_norm", 0.0),
-        features.get("carbs_norm", 0.0),
-        features.get("fat_norm", 0.0),
-        features.get("kapha", 0.0),
-        features.get("pitta", 0.0),
-        features.get("vata", 0.0),
-    ]
-    # choose number of qubits = min(4, len(v))
-    num_qubits = min(4, len(v))
-    num_layers = 2
+    if not _QISKIT_AVAILABLE:
+        raise RuntimeError("Qiskit not available")
 
-    qc, params = _build_simple_vqc(num_qubits, num_layers)
-
-    # Prepare quantum instance
     try:
-        backend = Aer.get_backend("aer_simulator_statevector")
-    except Exception:
-        backend = Aer.get_backend("aer_simulator")
-    qi = QuantumInstance(backend=backend, shots=512)
-
-    # map initial parameters deterministically from features
-    import numpy as np
-
-    init = np.array([(sum(v) % 1.0) + 0.1 * i for i in range(len(params))], dtype=float)
-
-    # define objective function: run circuit with given parameters, get expectation on Z of qubit 0,
-    # then combine with features to produce "risk" scalar.
-    def objective(x):
-        # set parameter values
-        bind_map = {p: float(xi) for p, xi in zip(params, x)}
-        bound_qc = qc.bind_parameters(bind_map)
-        # get statevector and compute expectation of Z on qubit 0
+        # Lazy import of AerSimulator for Qiskit 2.x
         try:
-            # prefer statevector for exact expectation if available
-            sv_backend = Aer.get_backend("aer_simulator_statevector")
-            job = execute(bound_qc, backend=sv_backend)
-            result = job.result()
-            sv = result.get_statevector(bound_qc)
-            # compute expectation of Z on qubit 0
-            # statevector is complex amplitudes; compute expectation directly
-            exp_z = 0.0
-            for idx, amp in enumerate(sv):
-                prob = abs(amp) ** 2
-                # bit 0 is least-significant bit in index ordering
-                bit0 = (idx >> 0) & 1
-                z = 1 if bit0 == 0 else -1
-                exp_z += prob * z
+            from qiskit_aer import AerSimulator
         except Exception:
-            # fallback: run shots and compute z expectation from counts
-            shots_backend = Aer.get_backend("aer_simulator")
-            bound_qc_measure = bound_qc.copy()
-            bound_qc_measure.save_statevector()
-            job = execute(bound_qc_measure, backend=shots_backend, shots=256)
-            res = job.result()
+            from qiskit.providers.aer import AerSimulator
+
+        # circuit sizing
+        num_features = len(features)
+        num_qubits = min(6, max(1, num_features))
+        num_layers = 2
+
+        # Build parameterized circuit
+        qc = QuantumCircuit(num_qubits)
+        params = []
+        for layer in range(num_layers):
+            for q in range(num_qubits):
+                p = Parameter(f"theta_{layer}_{q}")
+                params.append(p)
+                qc.ry(p, q)
+            for q in range(num_qubits - 1):
+                qc.cz(q, q + 1)
+        qc.measure_all()
+
+        # Prepare simulator backend
+        backend = AerSimulator()
+        # transpile once (parameterized circuits remain parameterized)
+        transpiled = transpile(qc, backend=backend, optimization_level=1)
+
+        # Helper: evaluate a parameter vector -> risk score using counts expectation on qubit-0
+        def eval_params(theta_values):
+            # map params -> values and assign them to the transpiled circuit
+            bind_map = {p: v for p, v in zip(params, theta_values)}
             try:
-                sv = res.get_statevector(bound_qc_measure)
-                exp_z = 0.0
-                for idx, amp in enumerate(sv):
-                    prob = abs(amp) ** 2
-                    bit0 = (idx >> 0) & 1
-                    z = 1 if bit0 == 0 else -1
-                    exp_z += prob * z
+                bound_circ = transpiled.assign_parameters(bind_map)
             except Exception:
-                # last fallback: random-ish estimate
-                exp_z = 0.0
+                # fallback: try assign on original qc
+                bound_circ = qc.assign_parameters(bind_map)
 
-        # combine with simple classical linear model: high calories & kapha -> higher risk
-        calories = features.get("calories_norm", 0.0)
-        kapha = features.get("kapha", 0.0)
-        # map exp_z (-1..1) to 0..1
-        qscore = (exp_z + 1.0) / 2.0
-        # risk estimate in 0..1
-        risk = 0.4 * calories + 0.3 * kapha + 0.3 * qscore
-        # objective: we return risk to minimize
-        return float(risk)
+            # run job on simulator
+            job = backend.run(bound_circ, shots=1024)
+            result = job.result()
+            # counts-based expectation
+            try:
+                counts = result.get_counts()
+            except Exception:
+                # sometimes result.get_counts() expects circuit argument
+                try:
+                    counts = result.get_counts(bound_circ)
+                except Exception:
+                    counts = {}
 
-    # Run a small classical optimizer (COBYLA) over parameters
-    try:
-        optimizer = COBYLA(maxiter=maxiter)
-        # initial guess
-        x0 = init
-        res = optimizer.optimize(num_vars=len(params), objective_function=objective, initial_point=x0)
-        params_opt = res[0] if isinstance(res, tuple) else res
-        risk_val = objective(params_opt)
-    except Exception as e:
-        logger.exception("Qiskit optimization failed, falling back to quick eval: %s", e)
-        # fallback behavior: compute objective at init
-        import numpy as np
-        risk_val = objective(init)
-        params_opt = init.tolist() if hasattr(init, "tolist") else list(init)
+            total = sum(counts.values()) if isinstance(counts, dict) else 0
+            if total == 0:
+                # no counts returned, assume neutral expectation
+                return 0.5  # mid-risk
 
-    # Build result dict
-    result = {
-        "engine": "qiskit_simulator",
-        "risk_score": float(max(0.0, min(1.0, risk_val))),
-        "params": [float(p) for p in params_opt] if hasattr(params_opt, "__iter__") else [],
-        "notes": "Variational circuit optimized on simulator (small).",
-        "timestamp": int(time.time()),
-    }
-    return result
+            exp = 0.0
+            for bitstr, c in counts.items():
+                # Qiskit bitstring order: qubit_n ... qubit_0 (rightmost is qubit-0)
+                bit0 = int(bitstr[::-1][0])
+                zval = 1.0 if bit0 == 0 else -1.0
+                exp += (c / total) * zval
+            # map expectation (+1 -> low risk) to risk [0,1]
+            risk = (1 - float(exp)) / 2.0
+            return max(0.0, min(1.0, risk))
 
+        # Random-search optimizer
+        import random
+        best_score = float("inf")
+        best_theta = None
+        dim = len(params) or 1
+        for it in range(maxiter):
+            theta = [random.uniform(-3.14159, 3.14159) for _ in range(dim)]
+            try:
+                score = eval_params(theta)
+            except Exception:
+                score = 0.5  # penalize if evaluation failed
+            if score < best_score:
+                best_score = score
+                best_theta = theta
+
+        recommended_portion_pct = max(0.1, 1.0 - best_score * 0.6)
+        safe_frequency = "limit" if best_score > 0.8 else ("1-2 times/week" if best_score > 0.4 else "regular")
+
+        return {
+            "engine": "qiskit_simulator",
+            "risk_score": float(best_score),
+            "recommended_portion_pct": float(recommended_portion_pct),
+            "safe_frequency": safe_frequency,
+            "notes": "Qiskit AerSimulator counts-based random-search evaluation",
+            "raw": {"best_theta": best_theta, "iterations": maxiter},
+        }
+
+    except Exception:
+        # bubble up so caller logs and falls back
+        raise
 
 # -------------------------
 # Classical fallback optimizer

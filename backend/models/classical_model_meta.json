@@ -1,0 +1,13 @@
+{
+  "model_path": "/home/vikram/Code/Project/foodscan-x/foodscan-x/backend/models/classical_model.joblib",
+  "scikit_model": "LogisticRegression",
+  "test_accuracy": 1.0,
+  "label_map": {
+    "0": "rice",
+    "1": "fruit_bowl",
+    "2": "fried_potato",
+    "3": "salad",
+    "4": "dessert"
+  },
+  "notes": "Trained on synthetic dataset for quick iteration"
+}

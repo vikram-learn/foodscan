@@ -11,6 +11,10 @@ from app.api.v1 import quantum
 
 # DB init
 from app.db.init_db import init_db
+# backend/app/main.py  (edit the on_startup function)
+from app.db.session import get_engine
+from app.services import quantum_worker
+
 
 # ---------------------------------------------------
 # Create FastAPI app
@@ -54,3 +58,14 @@ app.include_router(quantum.router, prefix="/api/v1", tags=["quantum"])
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "foodscan-x"}
+@app.on_event("startup")
+def on_startup():
+    init_db()
+    # start background worker (non-blocking)
+    try:
+        engine = get_engine()
+        quantum_worker.start_worker_on_thread(engine)
+    except Exception:
+        # if get_engine isn't available for some reason, worker won't start — safe fallback
+        import logging
+        logging.getLogger("quantum_worker").exception("Failed to start quantum worker")

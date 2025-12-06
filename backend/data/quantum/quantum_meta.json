@@ -1,0 +1,14 @@
+{
+  "source": "/home/vikram/Code/Project/foodscan-x/foodscan-x/backend/data/synthetic",
+  "n_qubits": 8,
+  "n_samples": 200,
+  "angle_range": 3.141592653589793,
+  "reduction": {
+    "method": "PCA 24->8",
+    "orig_shape": [
+      200,
+      24
+    ]
+  },
+  "created_by": "prepare_quantum_data.py"
+}

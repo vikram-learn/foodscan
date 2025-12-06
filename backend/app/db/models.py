@@ -1,42 +1,71 @@
-# backend/app/db/models.py
 from typing import Optional, List, Dict, Any
-from sqlmodel import SQLModel, Field, Column, JSON
+from datetime import datetime
+from sqlmodel import SQLModel, Field
+from sqlalchemy import Column, JSON, Text
 
-# --- User table (existing) ---
+# ===============================
+# Database models for FoodScan-X
+# ===============================
+
 class UserTable(SQLModel, table=True):
+    __tablename__ = "usertable"
+
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    email: str = Field(index=True, sa_column=Column("email", nullable=False, unique=True))
-    abha_id: Optional[str] = None
-    age: Optional[int] = None
-    gender: Optional[str] = None
+    name: str = Field(..., description="User name")
 
-    # Ayurveda personalization
-    dosha_type: Optional[str] = None   # vata/pitta/kapha
-    conditions: Optional[List[str]] = Field(default_factory=list, sa_column=Column(JSON), nullable=False)
+    # email as TEXT + unique
+    email: Optional[str] = Field(
+        default=None,
+        index=True,
+        sa_column=Column("email", Text, unique=True)
+    )
 
-# --- Quantum job table (existing) ---
+    abha_id: Optional[str] = Field(default=None, index=True)
+    age: Optional[int] = Field(default=None)
+    gender: Optional[str] = Field(default=None)
+    dosha_type: Optional[str] = Field(default=None)
+
+    # medical history stored as JSON array
+    conditions: List[str] = Field(
+        default_factory=list,
+        sa_column=Column(JSON)
+    )
+
+
 class QuantumJob(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    status: str = Field(default="queued", index=True)  # queued/processing/done/failed
-    engine: Optional[str] = None
-    input_payload: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON), nullable=True)
-    result: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON), nullable=True)
-    error: Optional[str] = None
+    __tablename__ = "quantumjob"
 
-# --- New: Scan record table ---
+    id: Optional[int] = Field(default=None, primary_key=True)
+    status: str = Field(default="queued", index=True)
+
+    input_payload: Dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON)
+    )
+    result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(JSON)
+    )
+
+    engine: Optional[str] = Field(default=None, index=True)
+    created_at: int = Field(default_factory=lambda: int(datetime.utcnow().timestamp()))
+    completed_at: Optional[int] = Field(default=None)
+
+
 class ScanRecord(SQLModel, table=True):
-    """
-    Stores a single scan result returned by the ML/Quantum pipeline.
+    __tablename__ = "scanrecord"
 
-    Fields:
-      - user_id: optional FK to UserTable.id (we keep it simple and not enforce foreign key constraints)
-      - filename: stored filename if image saved
-      - scan_payload: JSON blob with full detection, nutrition_estimate, ayurveda, meta etc.
-      - created_at: integer timestamp (unix) — we let other layers set it
-    """
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: Optional[int] = Field(default=None, index=True)
-    filename: Optional[str] = None
-    scan_payload: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON), nullable=True)
-    created_at: Optional[int] = None
+    user_id: Optional[int] = Field(
+        default=None,
+        foreign_key="usertable.id",
+        index=True
+    )
+    filename: Optional[str] = Field(default=None)
+
+    scan_payload: Dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON)
+    )
+
+    created_at: int = Field(default_factory=lambda: int(datetime.utcnow().timestamp()))

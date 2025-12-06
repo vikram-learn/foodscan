@@ -1,19 +1,19 @@
 {
   "engine": "qiskit_simulator",
-  "risk_score": 0.003906,
-  "recommended_portion_pct": 0.996094,
+  "risk_score": 0.010742,
+  "recommended_portion_pct": 0.989258,
   "safe_frequency": "regular",
   "notes": "Qiskit AerSimulator counts-based random-search evaluation",
   "raw": {
     "best_theta": [
-      0.3576228483296977,
-      0.3622798237690237,
-      0.35878404798520647,
-      -0.3611943738433929,
-      2.9763373854684314,
-      -1.0816631361143982
+      -1.68633118060716,
+      2.974912891067186,
+      2.121503330057525,
+      -1.9358715342942567,
+      -1.922081412828721,
+      -1.163573402836849
     ],
     "iterations": 32,
-    "timestamp": 1765024943
+    "timestamp": 1765028589
   }
 }

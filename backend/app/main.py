@@ -2,19 +2,18 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 
-# Import v1 routers (we import modules here; includes are below after app is created)
-from app.api.v1 import scan
-from app.api.v1 import auth
-from app.api.v1 import user
-from app.api.v1 import quantum
+# Relative imports (correct when running uvicorn backend.app.main:app)
+from .routes.conversation_svg import router as conversation_svg_router
 
-# DB init
-from app.db.init_db import init_db
-# backend/app/main.py  (edit the on_startup function)
-from app.db.session import get_engine
-from app.services import quantum_worker
+# v1 routers (relative imports)
+from .api.v1 import scan, auth, user, quantum
 
+# DB init + engine + services (relative imports)
+from .db.init_db import init_db
+from .db.session import get_engine
+from .services import quantum_worker
 
 # ---------------------------------------------------
 # Create FastAPI app
@@ -35,22 +34,32 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------
-# Startup: initialize DB
+# Startup: initialize DB and start background worker
 # ---------------------------------------------------
 @app.on_event("startup")
 def on_startup():
+    # initialize DB (creates tables / seed as configured)
     init_db()
+
+    # start background quantum worker in a separate thread (non-blocking)
+    try:
+        engine = get_engine()
+        quantum_worker.start_worker_on_thread(engine)
+    except Exception:
+        logging.getLogger("quantum_worker").exception("Failed to start quantum worker")
+
 
 # ---------------------------------------------------
 # Include Routers
-# Note: scan.router uses prefix "/scan" so we mount it under "/api/v1"
-#       resulting endpoints: /api/v1/scan/...
+# conversation_svg router exposes POST /conversation_svg
 # ---------------------------------------------------
+app.include_router(conversation_svg_router)
+
+# Note: scan.router uses prefix "/scan" so we mount it under "/api/v1"
 app.include_router(scan.router, prefix="/api/v1", tags=["scan"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(user.router, prefix="/api/v1/user", tags=["user"])
 app.include_router(quantum.router, prefix="/api/v1", tags=["quantum"])
-
 
 # ---------------------------------------------------
 # Root route
@@ -58,14 +67,3 @@ app.include_router(quantum.router, prefix="/api/v1", tags=["quantum"])
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "foodscan-x"}
-@app.on_event("startup")
-def on_startup():
-    init_db()
-    # start background worker (non-blocking)
-    try:
-        engine = get_engine()
-        quantum_worker.start_worker_on_thread(engine)
-    except Exception:
-        # if get_engine isn't available for some reason, worker won't start — safe fallback
-        import logging
-        logging.getLogger("quantum_worker").exception("Failed to start quantum worker")

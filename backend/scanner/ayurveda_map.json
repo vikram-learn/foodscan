@@ -1,0 +1,16 @@
+{
+  "banana": {
+    "rasa": "madhura",
+    "virya": "sheeta",
+    "vipaka": "madhura",
+    "dosha_effect": {"vata":"pacify","pitta":"increase","kapha":"increase"},
+    "notes": "Ripe banana is sweet and cooling. Prefer cooked/mashed for Vata."
+  },
+  "apple": {
+    "rasa": "madhura, amla",
+    "virya": "ushna",
+    "vipaka": "katu",
+    "dosha_effect": {"vata":"pacify","pitta":"pacify","kapha":"pacify"},
+    "notes": "Apple is generally balancing; prefer fresh for digestion."
+  }
+}

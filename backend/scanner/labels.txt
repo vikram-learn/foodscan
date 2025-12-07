@@ -1,0 +1,5 @@
+banana
+apple
+pizza
+fried_rice
+samosa

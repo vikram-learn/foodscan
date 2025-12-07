@@ -1,0 +1,7 @@
+
+# ignore local venv
+backend/.venv
+
+# ignore local models
+backend/scanner/models/*
+
